@@ -88,15 +88,50 @@ const run = async () => {
         ],
         metadata: {
           productId: paymentInfo._id,
+          parcelName: paymentInfo.parcelName,
         },
         customer_email: paymentInfo.senderEmail,
         mode: "payment",
-        success_url: `${process.env.CLIENT_SIDE_DOMAIN}/dashboard/payment-success`,
+        success_url: `${process.env.CLIENT_SIDE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${process.env.CLIENT_SIDE_DOMAIN}/dashboard/payment-cancelled`,
       });
 
       res.send({ url: session.url });
       console.log(session.url);
+    });
+
+    app.patch("/on-payment-success", async (req, res) => {
+      const sessionId = req.query.session_id;
+      console.log(sessionId);
+
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      res.send(session);
+      console.log(session);
+
+      if (session.payment_status === "paid") {
+        const id = session.metadata.productId;
+        const query = { _id: new ObjectId(id) };
+        const update = {
+          $set: {
+            paymentStatus: "paid",
+          },
+        };
+
+        const result = await parcelsColl.updateOne(query, update);
+        console.log(result);
+        res.send(result);
+
+        const paymentData = {
+          amount: session.cost / 100,
+          currency: session.currency,
+          customerEmail: session.customer_email,
+          parcelId: session.metadata.productId,
+          parcelName: session.metadata.parcelName,
+          transactionId: session.payment_intent,
+          paymentStatus: session.payment_status,
+          paidAt: new Date(),
+        };
+      }
     });
 
     // -----------------------------------------------
