@@ -40,6 +40,7 @@ const run = async () => {
 
     const zapShift = client.db("zapShift_DB");
     const parcelsColl = zapShift.collection("parcels_collection");
+    const paymentColl = zapShift.collection("payment_collection");
 
     app.post("/parcels", async (req, res) => {
       const query = req.body;
@@ -105,24 +106,42 @@ const run = async () => {
       console.log(sessionId);
 
       const session = await stripe.checkout.sessions.retrieve(sessionId);
-      res.send(session);
+      // res.send(session);
       console.log(session);
 
       if (session.payment_status === "paid") {
+        function generateTrackingId() {
+          const prefix = "PRCL";
+
+          const date = new Date();
+          const y = date.getFullYear();
+          const m = String(date.getMonth() + 1).padStart(2, "0");
+          const d = String(date.getDate()).padStart(2, "0");
+
+          const random = Math.random()
+            .toString(36)
+            .substring(2, 8)
+            .toUpperCase();
+
+          return `${prefix}-${y}${m}${d}-${random}`;
+        }
+        const trackingId = generateTrackingId();
+
         const id = session.metadata.productId;
         const query = { _id: new ObjectId(id) };
         const update = {
           $set: {
             paymentStatus: "paid",
+            trackingId: trackingId,
           },
         };
 
         const result = await parcelsColl.updateOne(query, update);
         console.log(result);
-        res.send(result);
+        // res.send({ updateInfo: result, paymentinfo: session });
 
         const paymentData = {
-          amount: session.cost / 100,
+          amount: parseFloat(session.cost) / 100,
           currency: session.currency,
           customerEmail: session.customer_email,
           parcelId: session.metadata.productId,
@@ -131,6 +150,15 @@ const run = async () => {
           paymentStatus: session.payment_status,
           paidAt: new Date(),
         };
+
+        const insertPaymentResponse = await paymentColl.insertOne(paymentData);
+        res.send({
+          success: true,
+          parcelModify: result,
+          paymentResponse: insertPaymentResponse,
+          trackingId: trackingId,
+          transactionId: session.payment_intent,
+        });
       }
     });
 
